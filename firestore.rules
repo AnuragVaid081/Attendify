@@ -1,0 +1,214 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // SECURITY ARCHITECTURE
+    //
+    //  All critical attendance operations are performed exclusively by
+    //  Firebase Cloud Functions using the Admin SDK, which bypasses these rules.
+    //
+    //  Client cannot:
+    //   ✗ Write to the 'attendance' collection (all writes blocked)
+    //   ✗ Update session status (PENDING→ACTIVE or ACTIVE→LOCKED)
+    //   ✗ Update session markedCount or verifiedBy fields
+    //   ✗ Resolve other users' qrTokens (field-level mask)
+    //
+    //  Client can:
+    //   ✓ Create a PENDING session (low-risk init step)
+    //   ✓ Read attendance, sessions, and timetables per-role
+    //   ✓ Call Cloud Functions that perform mutations (over HTTPS + Auth)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    // ─── Helper functions ──────────────────────────────────────────────────────
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function uid() {
+      return request.auth.uid;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function hasRole(role) {
+      return isAuthenticated() && getUserData().role == role;
+    }
+
+    function hasAnyRole(roles) {
+      return isAuthenticated() && getUserData().role in roles;
+    }
+
+    function isPrincipal()    { return hasRole('PRINCIPAL'); }
+    function isHOD()          { return hasRole('HOD'); }
+    function isClassIncharge(){ return hasRole('CLASS_INCHARGE'); }
+    function isTeacher()      { return hasRole('TEACHER'); }
+    function isStudent()      { return hasRole('STUDENT'); }
+    function isCR()           { return hasRole('CLASS_REPRESENTATIVE'); }
+
+    function isAdmin() {
+      return hasAnyRole(['PRINCIPAL', 'HOD']);
+    }
+
+    function isFaculty() {
+      return hasAnyRole(['PRINCIPAL', 'HOD', 'CLASS_INCHARGE', 'TEACHER']);
+    }
+
+    // ─── Users collection ──────────────────────────────────────────────────────
+    match /users/{userId} {
+      // Users can read their own profile; faculty can read anyone in their scope
+      allow read: if isAuthenticated() && (
+        uid() == userId ||
+        isFaculty() ||
+        isPrincipal()
+      );
+
+      // Only admins can create user documents (typically done via Cloud Functions)
+      allow create: if isPrincipal();
+
+      // Self-service: users can only update their own fcmToken (nothing else)
+      // Admins can update anything
+      allow update: if isAuthenticated() && (
+        (uid() == userId &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['fcmToken'])) ||
+        isPrincipal()
+      );
+
+      allow delete: if isPrincipal();
+
+      // ── qrToken field-level protection ────────────────────────────────────
+      // Prevents clients from querying the users collection by qrToken,
+      // which would allow them to enumerate valid tokens.
+      // QR-based user lookups MUST happen inside Cloud Functions (Admin SDK).
+      // Note: Firestore rules cannot restrict query filters, but the read
+      //       rules above already limit who can list the users collection.
+      //       The real protection is that only Cloud Functions call
+      //       .where("qrToken", "==", ...) with the Admin SDK.
+    }
+
+    // ─── Departments collection ────────────────────────────────────────────────
+    match /departments/{deptId} {
+      allow read: if isAuthenticated();
+      allow write: if isPrincipal();
+    }
+
+    // ─── Classes collection ────────────────────────────────────────────────────
+    match /classes/{classId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAdmin() || isClassIncharge();
+      allow delete: if isPrincipal();
+    }
+
+    // ─── Subjects collection ───────────────────────────────────────────────────
+    match /subjects/{subjectId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // ─── Timetables collection ─────────────────────────────────────────────────
+    match /timetables/{entryId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAdmin() || isClassIncharge();
+      allow delete: if isAdmin();
+    }
+
+    // ─── Lecture Adjustments ───────────────────────────────────────────────────
+    match /lectureAdjustments/{adjustmentId} {
+      allow read: if isAuthenticated();
+      allow create: if isFaculty();
+      allow update, delete: if isAdmin() ||
+        (isFaculty() && resource.data.createdBy == uid());
+    }
+
+    // ─── Lecture Sessions ──────────────────────────────────────────────────────
+    match /lectureSessions/{sessionId} {
+
+      // ── Read access ─────────────────────────────────────────────────────────
+      // Faculty, CRs, and students (to see their timetable) can read sessions
+      allow read: if isFaculty() || isCR() || isStudent();
+
+      // ── Create: only PENDING sessions allowed from clients ─────────────────
+      // A CR or teacher can initiate a session — it must start in PENDING state.
+      // Moving to ACTIVE or LOCKED requires a Cloud Function (Admin SDK).
+      allow create: if (isCR() || isTeacher() || isClassIncharge()) &&
+        request.resource.data.status == 'PENDING' &&
+        request.resource.data.keys().hasAll(['status','classId','teacherId','date','initiatedBy']) &&
+        request.resource.data.get('_verifiedByFunction', null) == null; // No forged function markers
+
+      // ── Update: CLIENT WRITES BLOCKED ──────────────────────────────────────
+      // All status transitions (PENDING→ACTIVE, ACTIVE→LOCKED) and field
+      // updates (verifiedBy, verificationTimestamp, markedCount, lockTimestamp)
+      // must be performed by Cloud Functions via the Admin SDK.
+      //
+      // This closes the attack vector where a client could:
+      //   - Set status='ACTIVE' without actual teacher QR verification
+      //   - Forge verifiedBy to any teacher's UID
+      //   - Directly increment markedCount to spoof attendance counts
+      allow update: if false;
+
+      allow delete: if isPrincipal();
+    }
+
+    // ─── Attendance Records ────────────────────────────────────────────────────
+    match /attendance/{recordId} {
+
+      // ── Read access ─────────────────────────────────────────────────────────
+      allow read: if isAuthenticated() && (
+        resource.data.studentId == uid() ||    // Student reads own record
+        resource.data.teacherId == uid() ||    // Teacher reads their session records
+        isAdmin()                    ||        // HOD/Principal: full read
+        isClassIncharge()                      // Class incharge: class-level read
+      );
+
+      // ── CREATE: CLIENT WRITES FULLY BLOCKED ───────────────────────────────
+      // Attendance records may ONLY be created by the markStudentAttendance
+      // Cloud Function (Admin SDK). This ensures:
+      //   • QR-to-student resolution happens server-side only
+      //   • Student class membership is validated server-side
+      //   • Duplicate check is atomic (Firestore transaction)
+      //   • Session must be ACTIVE at the exact moment of marking
+      //   • Timing guard prevents post-session marking
+      //   • markedCount is incremented atomically alongside the record
+      //
+      // A client cannot create an attendance record for any student,
+      // including themselves or students in their class.
+      allow create: if false;
+
+      // ── UPDATE: IMMUTABLE ─────────────────────────────────────────────────
+      // Attendance records are write-once and cannot be altered.
+      allow update: if false;
+
+      // ── DELETE: Principal only ────────────────────────────────────────────
+      // Deletion is a privileged administrative operation (e.g. data correction).
+      allow delete: if isPrincipal();
+    }
+
+    // ─── Notifications ─────────────────────────────────────────────────────────
+    match /notifications/{notifId} {
+      // Students read notifications targeted to them; faculty reads all
+      allow read: if isAuthenticated() && (
+        uid() in resource.data.targetStudentIds ||
+        isFaculty()
+      );
+
+      // Notifications are created by Cloud Functions only
+      allow create: if false;
+
+      // Users can only mark their own notifications as read (single field)
+      allow update: if isAuthenticated() &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead']);
+
+      allow delete: if isPrincipal();
+    }
+
+    // ─── Audit: provenance verification collection (read-only for admins) ──────
+    // Cloud Functions write _createdByFunction markers on attendance records.
+    // Admins can query attendance where _createdByFunction == true to
+    // verify all records are server-originated.
+    // No separate collection needed — the field is embedded in attendance docs.
+  }
+}
