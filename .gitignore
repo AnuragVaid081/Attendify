@@ -1,0 +1,61 @@
+# -----------------------------
+# General
+# -----------------------------
+*.log
+*.tmp
+*.swp
+.DS_Store
+Thumbs.db
+
+# -----------------------------
+# Gradle / Kotlin
+# -----------------------------
+.gradle/
+build/
+out/
+local.properties
+
+# -----------------------------
+# Android
+# -----------------------------
+*.apk
+*.aab
+captures/
+.externalNativeBuild/
+.cxx/
+.idea/
+*.iml
+
+# -----------------------------
+# Kotlin Multiplatform
+# -----------------------------
+shared/build/
+
+# -----------------------------
+# iOS / Xcode
+# -----------------------------
+iosApp/build/
+DerivedData/
+*.xcworkspace
+*.xcuserdata
+*.xcuserstate
+
+# -----------------------------
+# Firebase / Secrets
+# -----------------------------
+google-services.json
+GoogleService-Info.plist
+.env
+.env.*
+
+# -----------------------------
+# Node (for Cloud Functions)
+# -----------------------------
+node_modules/
+functions/node_modules/
+
+# -----------------------------
+# Misc
+# -----------------------------
+coverage/
+dist/
