@@ -58,6 +58,8 @@ dependencies {
     // Firebase
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.analytics)
+    implementation(libs.firebase.auth)
+    implementation(libs.firebase.messaging)
 
     // Koin
     implementation(libs.koin.android)
@@ -69,6 +71,7 @@ dependencies {
     implementation(libs.camerax.lifecycle)
     implementation(libs.camerax.view)
     implementation(libs.mlkit.barcode.scanning)
+    implementation(libs.accompanist.permissions)
 
     // QR Generation
     implementation(libs.zxing.core)

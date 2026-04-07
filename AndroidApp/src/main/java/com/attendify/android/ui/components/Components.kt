@@ -3,6 +3,10 @@ package com.attendify.android.ui.components
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.TableChart
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -253,19 +257,19 @@ fun AttendifyBottomNav(
         NavigationBarItem(
             selected = currentRoute == "dashboard",
             onClick = onDashboard,
-            icon = { Icon(androidx.compose.material.icons.Icons.Default.Home, contentDescription = null) },
+            icon = { Icon(Icons.Default.Home, contentDescription = null) },
             label = { Text("Home") }
         )
         NavigationBarItem(
             selected = currentRoute == "timetable",
             onClick = onTimetable,
-            icon = { Icon(androidx.compose.material.icons.Icons.Default.TableChart, contentDescription = null) },
+            icon = { Icon(Icons.AutoMirrored.Filled.TableChart, contentDescription = null) },
             label = { Text("Timetable") }
         )
         NavigationBarItem(
             selected = currentRoute == "notifications",
             onClick = onNotifications,
-            icon = { Icon(androidx.compose.material.icons.Icons.Default.Notifications, contentDescription = null) },
+            icon = { Icon(Icons.Default.Notifications, contentDescription = null) },
             label = { Text("Alerts") }
         )
     }

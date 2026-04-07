@@ -44,14 +44,17 @@ class FirebaseTimetableRepository : TimetableRepository {
     override suspend fun getAdjustmentsForDate(
         classId: String,
         date: String
-    ): List<LectureAdjustment> =
-        adjustments.where { "originalEntryId" inArray
-            timetables.where { "classId" equalTo classId }.get()
-                .documents.map { it.id }
-        }
-        .where { "date" equalTo date }
-        .get()
-        .documents.map { it.data<LectureAdjustment>() }
+    ): List<LectureAdjustment> {
+        val entryIds = timetables.where { "classId" equalTo classId }.get()
+            .documents.map { it.id }
+
+        if (entryIds.isEmpty()) return emptyList()
+
+        return adjustments.where { "originalEntryId" inArray entryIds }
+            .where { "date" equalTo date }
+            .get()
+            .documents.map { it.data<LectureAdjustment>() }
+    }
 
     override suspend fun swapLecture(adjustment: LectureAdjustment): Result<Unit> =
         saveAdjustment(adjustment.copy(adjustmentType = "SWAP"))

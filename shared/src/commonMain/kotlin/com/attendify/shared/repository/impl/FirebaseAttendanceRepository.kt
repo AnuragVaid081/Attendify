@@ -78,7 +78,7 @@ class FirebaseAttendanceRepository : AttendanceRepository {
     /**
      * Sends only [sessionId] + [teacherQrToken] to the Cloud Function.
      * The function resolves the teacher, validates the QR, checks the session,
-     * and transitions PENDING → ACTIVE atomatically.
+     * and transitions PENDING → ACTIVE automatically.
      *
      * The client never touches the 'users' collection for QR lookups,
      * and never writes a status field directly.
@@ -89,7 +89,9 @@ class FirebaseAttendanceRepository : AttendanceRepository {
     ): Result<LectureSession> = try {
         val callable = fnClient.httpsCallable("validateAttendanceSession")
 
-        // Send minimal payload — only what the Cloud Function needs
+        // Send minimal payload. GitLive HttpsCallable.invoke() returns
+        // HttpsCallableResult — we don't need the result here since we
+        // re-fetch the session state directly from Firestore after the call.
         callable.invoke(
             mapOf(
                 "sessionId"      to sessionId,
@@ -126,21 +128,24 @@ class FirebaseAttendanceRepository : AttendanceRepository {
     ): Result<AttendanceRecord> = try {
         val callable = fnClient.httpsCallable("markStudentAttendance")
 
-        // Minimal payload — QR token + session only
-        val response = callable.invoke<Map<String, Any?>>(
+        // GitLive HttpsCallable.invoke() returns HttpsCallableResult.
+        // Access .data to get the underlying Any? payload from the function,
+        // then safe-cast to Map<*, *> — do NOT use bracket access on a
+        // generic type parameter (causes "No 'get' operator" compile error).
+        val result = callable.invoke(
             mapOf(
                 "sessionId"      to sessionId,
                 "studentQrToken" to studentQrToken
             )
         )
 
-        val alreadyMarked = response.data["alreadyMarked"] as? Boolean ?: false
+        // result.data() gets the payload — safe-cast to Map<*, *> before key access
+        val responseMap = result.data<Map<String, Boolean>>()
+        val alreadyMarked = responseMap["alreadyMarked"] ?: false
 
         if (alreadyMarked) {
             Result.failure(AlreadyMarkedException("Attendance already marked for this student"))
         } else {
-            // Return a lightweight record — full record is in Firestore
-            // The client observes real-time records via observeSessionRecords()
             Result.success(
                 AttendanceRecord(
                     sessionId  = sessionId,

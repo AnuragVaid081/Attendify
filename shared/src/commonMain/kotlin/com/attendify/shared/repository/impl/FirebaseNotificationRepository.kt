@@ -15,7 +15,7 @@ class FirebaseNotificationRepository : NotificationRepository {
 
     override fun observeNotifications(userId: String): Flow<List<NotificationModel>> =
         notifications
-            .where { "targetStudentIds" arrayContains userId }
+            .where { "targetStudentIds" contains userId }
             .orderBy("timestamp", Direction.DESCENDING)
             .snapshots.map { snapshot ->
                 snapshot.documents.map { it.data<NotificationModel>() }
@@ -27,7 +27,7 @@ class FirebaseNotificationRepository : NotificationRepository {
 
     override suspend fun getUnreadCount(userId: String): Int =
         notifications
-            .where { "targetStudentIds" arrayContains userId }
+            .where { "targetStudentIds" contains userId }
             .where { "isRead" equalTo false }
             .get()
             .documents.size
